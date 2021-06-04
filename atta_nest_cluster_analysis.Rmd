@@ -1,0 +1,78 @@
+---
+title: "Atta Nest Cluster Analysis"
+author: "Conor McMahon"
+date: "5/24/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(sf)
+library(here)
+library(tidyverse)
+library(nabor)
+
+```
+
+
+```{r}
+
+bfl_nests_current <- st_read(here::here("nests","bfl_cz.csv"), 
+                             options=c("X_POSSIBLE_NAMES=easting","Y_POSSIBLE_NAMES=northing"))
+hornsby_nests_current <- st_read(here::here("nests","hornsby_cz.csv"), 
+                                 options=c("X_POSSIBLE_NAMES=easting","Y_POSSIBLE_NAMES=northing"))
+bfl_nests_waller <- st_read(here::here("nests","bfl_waller.csv"), 
+                            options=c("X_POSSIBLE_NAMES=easting","Y_POSSIBLE_NAMES=northing"))
+
+# Load Data
+hornsby_nests <- read_csv(here::here("nests","hornsby_combined.csv"))
+hornsby_nests_current <- hornsby_nests %>% filter(year > 2010)
+hornsby_nests_original <- hornsby_nests %>% filter(year < 2010)
+coordinates(hornsby_nests_current) = ~easting+northing
+hornsby_nests_current@data$IDS <- 1:(nrow(hornsby_nests_current))
+coordinates(hornsby_nests_original) = ~easting+northing
+hornsby_nests_original@data$IDS <- 1:(nrow(hornsby_nests_original))
+# Nearest Neighbor Analysis
+knn_hornsby_current <- knn(coordinates(hornsby_nests_current), coordinates(hornsby_nests_current), 
+                           k=nrow(hornsby_nests_current))
+observe_df <- data.frame(type=rep("observation",length(as.numeric(knn_hornsby_current[[2]][,2:3]))),
+                        distance=as.numeric(knn_hornsby_current[[2]][,2:3]))
+# Histogram of distances to nearest 2 neighbors
+hist(as.numeric(knn_hornsby_current[[2]][,2:3]), breaks=(0:20)*15)
+
+# Load bounding polygon and subsample randomly
+hornsby_polygon <- readOGR(here::here("polygons","searched_area_hornsby_mueller.shp"))
+proj4string(hornsby_polygon) <- CRS("+init=epsg:4326")
+hornsby_polygon <- spTransform(hornsby_polygon, CRS("+init=epsg:6657"))
+getSampleDistances <- function(polygon, count, max_neighbor)
+{
+  hornsby_current_sample <- spsample(hornsby_polygon,
+         n=nrow(hornsby_nests_current), "random")
+  knn_hornsby_current_sample <- knn(coordinates(hornsby_current_sample), 
+                                    coordinates(hornsby_current_sample), 
+                             k=length(hornsby_current_sample))
+  return(as.numeric(knn_hornsby_current_sample[[2]][,(2:max_neighbor)]))
+}
+hornsby_current_sample <- spsample(hornsby_polygon,
+         n=nrow(hornsby_nests_current), "random")
+knn_hornsby_current_sample <- knn(coordinates(hornsby_current_sample), coordinates(hornsby_current_sample), 
+                           k=length(hornsby_current_sample))
+sample <- getSampleDistances(hornsby_polygon, nrow(hornsby_nests_current), 3)
+for(ind in 1:30)
+{
+  sample <- c(sample, getSampleDistances(hornsby_polygon, nrow(hornsby_nests_current), 3))
+}
+# Convert distances to data frame
+sample_df <- data.frame(type=rep("sample",length(sample)),
+                        distance=sample)
+
+
+# Compare Histograms for Sample vs. Observations
+ggplot(data=distances_df) + 
+    geom_histogram(aes(x=distance,y=stat(density))) + 
+    facet_wrap(~type) +
+    scale_y_continuous(labels = scales::percent)
+
+```
+
